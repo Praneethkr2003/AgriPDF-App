@@ -129,7 +129,7 @@ Pull requests, ideas, and suggestions are welcome!
 
 ## ✨ Credits
 
-Built by [Your Name] using OpenAI, Streamlit, and modern NLP tools to support better understanding of agricultural documents.
+Built by Praneeth and Kaif from Aegion dynamics as intern in NLP using OpenAI, Streamlit, and modern NLP tools to support better understanding of agricultural documents.
 
 
 ## ✨ WorkFlow
