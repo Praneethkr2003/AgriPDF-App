@@ -1,0 +1,11 @@
+streamlit
+openai
+sentence-transformers
+scikit-learn
+pandas
+numpy
+python-docx
+python-pptx
+PyMuPDF
+tqdm
+Pillow
