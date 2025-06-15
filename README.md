@@ -14,6 +14,7 @@ An AI-powered web application for extracting, analyzing, and searching agricultu
 - 💾 **Smart Caching**: Avoids reprocessing PDFs by hashing and storing status in a local SQLite DB.
 
 ---
+Test The App over here : https://agripdf-app-7awjajuk2v7bogpjktlhzz.streamlit.app
 
 ## 🧑‍💻 Tech Stack
 
