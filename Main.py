@@ -34,7 +34,6 @@ class AgriculturalML:
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         self.db_path = "agricultural_ml.db"
         self.image_dir = "extracted_images"
-        self.word_path = "themes_and_subthemes.docx"
         os.makedirs(self.image_dir, exist_ok=True)
         self.init_db()
         
@@ -198,65 +197,6 @@ Enhanced query with agricultural context:
             logger.error(f"Query enhancement error: {e}")
             return query
 
-    def extract_themes_and_write_word(self, text_data: List[Dict], pdf_hash: str):
-        """Extract themes only once per PDF"""
-        # Check if themes already extracted for this PDF
-        if os.path.exists(f"{self.word_path}_{pdf_hash[:8]}.docx"):
-            logger.info(f"Themes already extracted for PDF {pdf_hash[:8]}")
-            return
-            
-        prompt_template = """
-Extract high-level themes and subthemes based on the following codebook from the agricultural text:
-
-Codebook:
-{
-    "Farmer Welfare": ["Farmer Incomes", "Nutrition Security", "Health & Life Insurance", "Livelihood Security", "Costs of Cultivation"],
-    "Production Support": ["Water Management", "Soil Health Management", "Fertilisers", "Pest Management", "Access to Credit"],
-    "Price Support": ["Price Discovery", "Price Stability", "Fair and Assured Price", "Marketing", "Collectivisation"],
-    "Risk Management": ["Crop Insurance", "Contract Farming"],
-    "Environmental Sustainability": ["Climate Change", "Sustainable Agriculture", "Crop Diversification", "Central Government Schemes", "State Government Schemes"],
-    "Financing": ["Union Budget Allocation", "State Budget Allocation", "Private Financing", "Climate Financing"]
-}
-
-Text: {text}
-
-Return only relevant themes found in the text in this format:
-Theme | Subtheme | Key Information
-------|----------|----------------
-"""
-        
-        # Sample text to avoid token limits
-        combined_text = "\n\n".join([entry['content'][:500] for entry in text_data[:20]])
-        prompt = prompt_template.replace("{text}", combined_text)
-
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=2000
-            )
-            
-            content = response.choices[0].message.content
-            lines = content.strip().splitlines()
-            rows = [line.split('|') for line in lines if '|' in line and not line.strip().startswith('Theme')]
-            clean_rows = [[cell.strip() for cell in row] for row in rows if len(row) >= 3]
-
-            if clean_rows:
-                doc = Document()
-                doc.add_heading("Extracted Themes and Subthemes", level=1)
-
-                for theme, subtheme, text in clean_rows:
-                    doc.add_paragraph(f"\nTheme: {theme}", style='Heading 2')
-                    doc.add_paragraph(f"Subtheme: {subtheme}", style='Heading 3')
-                    doc.add_paragraph(text)
-
-                doc.save(f"{self.word_path}_{pdf_hash[:8]}.docx")
-                logger.info(f"Themes extracted and saved to {self.word_path}_{pdf_hash[:8]}.docx")
-            
-        except Exception as e:
-            logger.error(f"Word generation error: {e}")
-
     def store_document(self, pdf_hash: str, page_number: int, content: str, image_paths: List[str]):
         """Store document chunks with PDF hash"""
         chunks = self.chunk_text(content)
@@ -330,10 +270,6 @@ Theme | Subtheme | Key Information
             
         self.processed_pdfs.add(pdf_hash)
 
-        # Extract themes only once
-        if all_text_data:
-            self.extract_themes_and_write_word(all_text_data, pdf_hash)
-            
         doc.close()
         return pdf_hash
 
@@ -416,10 +352,22 @@ Theme | Subtheme | Key Information
 def main():
     st.set_page_config(page_title="Agricultural PDF Processor", page_icon="📄", layout="wide")
     
-    st.title("📄 Agricultural PDF Processor")
-    st.markdown("Upload PDF files to extract and embed content for intelligent search.")
-
-    # Sidebar for configuration
+    # Initialize session state
+    if 'expanded_content' not in st.session_state:
+        st.session_state.expanded_content = {}
+    if 'search_results' not in st.session_state:
+        st.session_state.search_results = None
+    
+    # Initialize variables
+    ml_system = None
+    azure_api_key = None
+    azure_endpoint = None
+    uploaded_files = None
+    force_reprocess = None
+    
+    st.title("Agricultural Knowledge Base")
+    
+    # Get Azure credentials from sidebar
     with st.sidebar:
         st.header("Configuration")
         azure_api_key = st.text_input("Azure API Key", type="password")
@@ -473,30 +421,106 @@ def main():
 
     with col2:
         st.header("Search & Query")
-        query = st.text_input("Enter your search query", placeholder="e.g., farmer income, crop insurance, water management")
+        query = st.text_input("🔍 Enter your search query:")
         
         if query and azure_api_key and azure_endpoint:
-            ml_system = AgriculturalML(azure_api_key, azure_endpoint)
+            if st.button("🔍 Search"):
+                with st.spinner("Searching..."):
+                    if ml_system is None:
+                        ml_system = AgriculturalML(azure_api_key, azure_endpoint)
+                    results = ml_system.search_and_beautify(query, top_k)
+                    
+                    if results:
+                        st.session_state.search_results = results
+                        st.success(f"Found {len(results)} relevant results")
+                    else:
+                        st.session_state.search_results = None
+                        st.warning("No relevant results found. Try adjusting your query or lowering the similarity threshold.")
             
-            with st.spinner("Searching..."):
-                results = ml_system.search_and_beautify(query, top_k)
-            
-            if results:
-                st.success(f"Found {len(results)} relevant results")
-                
-                for i, result in enumerate(results, 1):
-                    with st.expander(f"📄 Result {i} - Page {result['page_number']} (Similarity: {result['similarity_score']:.3f})"):
-                        st.markdown("**Enhanced Content:**")
-                        st.markdown(result['beautified_text'])
-                        
-                        if st.checkbox(f"Show original text {i}", key=f"original_{i}"):
-                            st.markdown("**Original Content:**")
-                            st.text(result['original_text'])
-                        
-                        # Display images
-                        for image_path in result['image_paths']:
-                            if os.path.exists(image_path):
-                                st.image(image_path, width=400, caption=f"Image from page {result['page_number']}")
+            if st.session_state.search_results:
+                for i, result in enumerate(st.session_state.search_results, 1):
+                        with st.expander(f"📄 Result {i} - Page {result['page_number']} (Similarity: {result['similarity_score']:.3f})"):
+                            st.markdown("**Enhanced Content:**")
+                            st.markdown(result['beautified_text'])
+                            
+                            if st.checkbox(f"Show original text {i}", key=f"original_{i}"):
+                                st.markdown("**Original Content:**")
+                                st.text(result['original_text'])
+                            
+                            # Display images
+                            for image_path in result['image_paths']:
+                                if os.path.exists(image_path):
+                                    st.image(image_path, width=400, caption=f"Image from page {result['page_number']}")
+                            
+                            # Initialize ml_system if not already initialized
+                            if ml_system is None:
+                                ml_system = AgriculturalML(azure_api_key, azure_endpoint)
+                            
+                            # Add expand button for LLM context
+                            # Generate a unique key based on result content
+                            result_key = f"expand_{i}_{hash(result['beautified_text'])}"
+                            if st.button(f"Expand {i} with LLM", key=result_key):
+                                try:
+                                    # Check if Azure API Key and Endpoint are provided
+                                    if not azure_api_key or not azure_endpoint:
+                                        st.error("Please provide Azure API Key and Endpoint first")
+                                        st.error("Enter your Azure OpenAI API key and endpoint URL in the sidebar")
+                                        return
+                                    
+                                    # Generate expanded context using Azure OpenAI
+                                    st.info("🔍 Generating detailed context...")
+                                    
+                                    # Use Azure OpenAI to generate detailed context
+                                    expanded_context = ml_system.client.chat.completions.create(
+                                        model="gpt-4o",
+                                        messages=[
+                                            {"role": "system", "content": "You are a helpful assistant that specializes in agricultural knowledge. Provide detailed, relevant, and accurate information about agricultural topics. Focus on practical applications and current best practices."},
+                                            {"role": "user", "content": f"Expand and provide more detailed context about this agricultural topic: {result['beautified_text']}. Include relevant agricultural practices, challenges, solutions, and current trends related to this topic. Make the response detailed and actionable."}
+                                        ],
+                                        temperature=0.7,
+                                        max_tokens=1000,
+                                        top_p=0.9
+                                    )
+                                    
+                                    expanded_text = expanded_context.choices[0].message.content
+                                    if expanded_text:
+                                        # Store expanded content in session state
+                                        st.session_state.expanded_content[f"result_{i}"] = expanded_text
+                                        st.success("Expanded context generated successfully!")
+                                        st.balloons()
+                                    else:
+                                        st.warning("LLM returned empty response")
+                                except Exception as e:
+                                    error_msg = str(e)
+                                    if "DeploymentNotFound" in error_msg:
+                                        st.error("❌ Error: Azure OpenAI deployment not found")
+                                        st.error("Please check your Azure OpenAI deployment configuration:")
+                                        st.error("1. Go to Azure Portal > Azure OpenAI Service")
+                                        st.error("2. Create a new deployment or wait for existing deployment to be ready")
+                                        st.error("3. Ensure the deployment name matches your configuration")
+                                        st.error("4. Verify the deployment status is 'Succeeded'")
+                                        st.error("5. Wait a few minutes after deployment creation before using")
+                                    else:
+                                        st.error("❌ Error generating expanded context:")
+                                        st.error(f"Error details: {error_msg}")
+                                        st.error("Please check:")
+                                        st.error("1. Your Azure API Key and Endpoint configuration")
+                                        st.error("2. API key permissions for chat completions")
+                                        st.error("3. Azure endpoint URL accessibility")
+                                        st.error("4. Network connectivity")
+                                        st.error("If the issue persists, please try:")
+                                        st.error("- Verify your Azure credentials")
+                                        st.error("- Check your Azure OpenAI service status")
+                                        st.error("- Ensure your API key has the necessary permissions")
+                                        st.error("- Try with a different query")
+                                finally:
+                                    # Display stored expanded content
+                                    if f"result_{i}" in st.session_state.expanded_content:
+                                        st.markdown("---")
+                                        st.markdown("**🔍 Detailed Agricultural Context:**")
+                                        st.markdown("---")
+                                        st.markdown(st.session_state.expanded_content[f"result_{i}"])
+                                        st.markdown("---")
             else:
                 st.warning("No relevant results found. Try adjusting your query or lowering the similarity threshold.")
 
