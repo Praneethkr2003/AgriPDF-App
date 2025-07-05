@@ -55,7 +55,7 @@ pip install -r requirements.txt
 ## 🧪 Running Locally
 
 ```bash
-streamlit run exp.py
+streamlit run Main.py
 ```
 
 Visit: [http://localhost:8501](http://localhost:8501)
@@ -72,7 +72,7 @@ ngrok config add-authtoken <your_token>
 
 2. Run app and start tunnel:
 ```bash
-streamlit run exp.py
+streamlit run Main.py
 ngrok http 8501
 ```
 
@@ -105,7 +105,7 @@ azure_endpoint = "https://your-resource-name.openai.azure.com/"
 
 ```
 .
-├── exp.py                      # Main Streamlit app
+├── Main.py                      # Main Streamlit app
 ├── requirements.txt            # Python dependencies
 ├── extracted_images/           # Auto-created, stores images
 ├── agricultural_ml.db          # SQLite DB (auto-created)
